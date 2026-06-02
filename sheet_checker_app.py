@@ -1,3 +1,4 @@
+# sheet_checker_app.py
 import streamlit as st
 import cv2
 import pytesseract
@@ -7,23 +8,18 @@ import pandas as pd
 import speech_recognition as sr
 from gtts import gTTS
 from io import BytesIO
-import os
-import difflib
 
 # ---------------------------
-# Tesseract Path Configuration
+# Tesseract path
 # ---------------------------
-# Handles local development (Windows) and production (Streamlit Cloud Linux) automatically
-if os.path.exists("/usr/bin/tesseract"):
-    pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
-else:
-    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# Local Windows
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# Cloud deploy: "/usr/bin/tesseract"
 
 # ---------------------------
-# Helper Function for TTS
+# Helper TTS function
 # ---------------------------
 def speak(text):
-    """Generates and plays speech from text via gTTS safely in the cloud."""
     tts = gTTS(text)
     mp3_fp = BytesIO()
     tts.write_to_fp(mp3_fp)
@@ -31,35 +27,75 @@ def speak(text):
     st.audio(mp3_fp, format="audio/mp3")
 
 # ---------------------------
-# Text Comparison Logic
+# Streamlit Layout
 # ---------------------------
-def highlight_differences(sheet_text, spoken_text):
-    """
-    Compares the original sheet text with spoken text.
-    Returns clean, styled HTML to visually point out mistakes.
-    """
-    sheet_words = sheet_text.lower().strip().split()
-    spoken_words = spoken_text.lower().strip().split()
-    
-    matcher = difflib.SequenceMatcher(None, sheet_words, spoken_words)
-    html_output = []
-    
-    for opcode, a_start, a_end, b_start, b_end in matcher.get_opcodes():
-        if opcode == 'equal':
-            # Word read perfectly
-            for word in sheet_words[a_start:a_end]:
-                html_output.append(f"<span style='color: #2e7d32; font-weight: bold;'>{word}</span>")
-        elif opcode == 'replace':
-            # Word read incorrectly (Substituted)
-            for word in sheet_words[a_start:a_end]:
-                html_output.append(f"<span style='background-color: #ffcdd2; color: #b71c1c; text-decoration: line-through;'>{word}</span>")
-            for word in spoken_words[b_start:b_end]:
-                html_output.append(f"<span style='background-color: #ffe0b2; color: #e65100;'>{word}</span>")
-        elif opcode == 'delete':
-            # Word skipped completely
-            for word in sheet_words[a_start:a_end]:
-                html_output.append(f"<span style='background-color: #cfd8dc; color: #37474f; border-bottom: 2px dashed red;'>{word}</span>")
-        elif opcode == 'insert':
-            # Extra word added that wasn't on the sheet
-            for word in spoken_words[b_start:b_end]:
-                html_output.append(
+st.set_page_config(page_title="Sheet + Voice Evaluator", layout="centered")
+st.title("📋 Sheet + Voice Evaluator")
+
+# Step 1: Camera input
+st.subheader("Step 1: Capture your sheet")
+uploaded_image = st.camera_input("Take a picture of your sheet")
+
+if uploaded_image:
+    img = Image.open(uploaded_image)
+    img_array = np.array(img)
+    gray = cv2.cvtColor(img_array, cv2.COLOR_BGR2GRAY)
+
+    # OCR text extraction
+    ocr_text = pytesseract.image_to_string(gray)
+    ocr_lines = [line.strip() for line in ocr_text.split("\n") if line.strip() != ""]
+    st.text_area("OCR Output", "\n".join(ocr_lines))
+
+    # Step 2: Voice input
+    st.subheader("Step 2: Record your answers by voice")
+    record_voice = st.button("🎤 Record Voice Input")
+
+    if record_voice:
+        recognizer = sr.Recognizer()
+        with sr.Microphone() as source:
+            st.info("Recording for 5 seconds...")
+            audio = recognizer.record(source, duration=5)
+        try:
+            voice_text = recognizer.recognize_google(audio)
+            st.write("You said:", voice_text)
+            speak(f"You said: {voice_text}")
+            voice_lines = [line.strip() for line in voice_text.split(",") if line.strip() != ""]
+        except:
+            st.error("Could not recognize voice")
+            voice_lines = []
+
+        # Step 3: Evaluate
+        st.subheader("Step 3: Evaluation")
+
+        # Load correct answers Excel
+        correct_file = st.file_uploader("Upload Correct Answers Excel", type=['xlsx'])
+        if correct_file:
+            correct_data = pd.read_excel(correct_file)
+            correct_list = correct_data['Answer'].astype(str).tolist()
+
+            # Combine OCR + Voice input
+            user_input = ocr_lines + voice_lines
+
+            results = []
+            correct_count = 0
+            for item in user_input:
+                if item in correct_list:
+                    status = "Correct"
+                    correct_count += 1
+                else:
+                    status = "Wrong"
+                results.append({'Item': item, 'Status': status})
+
+            df_results = pd.DataFrame(results)
+
+            # Highlight correct/wrong
+            def highlight_status(row):
+                return ['background-color: lightgreen' if row.Status == 'Correct' else 'background-color: salmon']*2
+
+            st.dataframe(df_results.style.apply(highlight_status, axis=1))
+
+            # Step 4: Show % correct
+            total_items = len(correct_list)
+            percentage = (correct_count / total_items) * 100
+            st.success(f"You got {percentage:.2f}% correct")
+            speak(f"You got {percentage:.2f} percent correct")
