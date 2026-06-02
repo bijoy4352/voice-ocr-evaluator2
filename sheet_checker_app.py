@@ -1,4 +1,3 @@
-# sheet_checker_app.py
 import streamlit as st
 import cv2
 import pytesseract
@@ -8,15 +7,19 @@ import pandas as pd
 import speech_recognition as sr
 from gtts import gTTS
 from io import BytesIO
+import os
 
 # ---------------------------
-# Tesseract path (Windows)
+# Tesseract Path configuration (Cross-Platform)
 # ---------------------------
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-# If deploying online, use: pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
+# Checks if running on Streamlit Cloud (Linux), otherwise falls back to your Windows path
+if os.path.exists("/usr/bin/tesseract"):
+    pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
+else:
+    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 # ---------------------------
-# Helper function for TTS
+# Helper function for TTS (Google Text-to-Speech)
 # ---------------------------
 def speak(text):
     tts = gTTS(text)
@@ -34,27 +37,35 @@ st.title("📄 Sheet + Voice Checker App")
 # Camera input
 uploaded_image = st.camera_input("Capture your sheet")
 
-# Voice input
+# Voice input using Browser Audio Recording
 st.subheader("🎤 Voice Input")
-recognizer = sr.Recognizer()
-with sr.Microphone() as source:
-    st.write("Recording 5 seconds...")
-    audio_data = recognizer.record(source, duration=5)
+
+# st.audio_input leverages the user's browser/device mic correctly in the cloud
+recorded_audio = st.audio_input("Record your voice instructions")
+
+if recorded_audio is not None:
+    recognizer = sr.Recognizer()
     try:
-        voice_text = recognizer.recognize_google(audio_data)
-        st.write("You said:", voice_text)
-        speak(f"You said: {voice_text}")
+        # Convert the Streamlit uploaded file into an audio file SpeechRecognition can read
+        with sr.AudioFile(recorded_audio) as source:
+            audio_data = recognizer.record(source)
+            voice_text = recognizer.recognize_google(audio_data)
+            
+            st.success(f"You said: {voice_text}")
+            speak(f"You said: {voice_text}")
     except Exception as e:
-        st.write("Could not recognize voice.")
+        st.error("Could not recognize voice. Try speaking more clearly.")
         speak("Could not recognize voice.")
 
 # OCR processing
 if uploaded_image:
     img = Image.open(uploaded_image)
     img_array = np.array(img)
+    
+    # Process image text
     ocr_text = pytesseract.image_to_string(img_array)
     st.subheader("📑 OCR Output")
-    st.text_area("Extracted Text", ocr_text)
+    st.text_area("Extracted Text", ocr_text, height=200)
 
-    # Optionally speak the OCR result
+    # Speak the OCR result alert
     speak("OCR result is ready.")
