@@ -1,8 +1,9 @@
+opencv-python
 streamlit
 pytesseract
-pandas
-openpyxl
 pillow
-speechrecognition
+numpy
+pandas
 pyttsx3
-opencv-python
+SpeechRecognition
+openpyxl
